@@ -73,11 +73,11 @@ vector<double> gen_empty_N(int n){
 }
 
 double sig(double x){
-    return 1.0/(1.0 + exp(-x));
+    return min(1.0/(1.0 + exp(-x)), 1.0);
 }
 
 double dsig(double x){
-    return sig(x)*(1-sig(-x));
+    return min(sig(x)*(1-sig(-x)), x);
 }
 
 vector<double> sigmoid_it(vector<double> x){
@@ -129,6 +129,14 @@ struct Layer {
     }
 
     vector<double> feedForward(vector<double> x){
+        vector<double> mmult = matrixMult(x, weights);
+        if (activation_method == 1){
+            cout << "last layer" << ": ";
+            for (auto e : mmult) cout << e << ", ";
+            cout << endl;
+            for (auto e : x) cout << e << " ;";
+            cout << endl;
+        }
         return lastActivation = activation(vectorAdd(matrixMult(x, weights), biases), activation_method);
     }
 };
@@ -152,15 +160,13 @@ struct Network{
     }
 
     vector<double> forward(vector<double> start){
-        cout << layers.size() << endl;
-        for (Layer& L : layers){
-            start = L.feedForward(start);
-            cout << L.activation_method << endl;
-            //start = activation(start, 0);
-            cout << "Steppp: ";
+        for (int i = 0; i < layers.size(); i++){
+            cout << "in_forward: " << i << ": " << layers[i].biases[0] << endl;
             for (auto e : start)cout << e << " ";
             cout << endl;
+            start = layers[i].feedForward(start);
         }
+        
         return start;
     }
 
@@ -170,28 +176,106 @@ struct Network{
 
         if (is_last)for (int j = 0; j < L.lastActivation.size(); j++)init_cost[j] = 2*(L.lastActivation[j]-Y[j]);
     
-        for (int j = 0; j < L.lastActivation.size(); j++)bias_proposals[j] = dsig(L.lastActivation[j])*init_cost[j];
+        for (int j = 0; j < L.lastActivation.size(); j++){
+            bias_proposals[j] = dsig(L.lastActivation[j])*init_cost[j];
+            if (abs(bias_proposals[j]) < 0.0001 || abs(bias_proposals[j]) > 1)bias_proposals[j] = 0;
+        }
 
         for (int k = 0; k < L.n; k++){
             for (int j = 0; j < L.lastActivation.size(); j++){
                 weight_proposals[j][k] = last_layer.lastActivation[k]*dsig(L.lastActivation[j])*init_cost[j];
+                if (abs(weight_proposals[j][k]) < 0.0001 || abs(weight_proposals[j][k]) > 1)weight_proposals[j][k] = 0;
             }
         }
         
         return {{weight_proposals, bias_proposals}, init_cost};
     }
 
-    void update(int layer_no, vector<vector<double>> weight_proposals, vector<double> bias_proposals){
+    void update(int layer_no, vector<vector<double>> weight_proposals, vector<double> bias_proposals, double alpha){
         for (int i = 0; i < weight_proposals.size(); i++){
             for (int j = 0; j < weight_proposals[0].size(); j++){
-                layers[layer_no].weights[i][j] -= weight_proposals[i][j];
+                layers[layer_no].weights[i][j] -= alpha*weight_proposals[i][j];
             }
         }
 
-        for (int i = 0; i < bias_proposals.size(); i++)layers[layer_no].biases[i] -= bias_proposals[i];
+        for (int i = 0; i < bias_proposals.size(); i++)layers[layer_no].biases[i] -= alpha*bias_proposals[i];
     }
 
 };
+
+void train(Network& Net, vector<double> train_x, vector<pair<double, double> > train_y, int batch_size, double learning_rate){
+    vector<double> ac_x;
+    vector<pair<double, double>> ac_y;
+    for (int i = 0; i < batch_size; i++){
+        int j = rand()%(train_x.size());
+        ac_x.push_back(train_x[j]);
+        ac_y.push_back(train_y[j]);
+    }
+
+    vector<pair<vector<vector<double>>, vector<double>>> suggestions;
+
+
+    for (int i = 0; i < batch_size; i++){
+        Net.forward({ac_x[i]});
+        bool is_last = true;
+        vector<double> init_cost = {0, 0};
+        int counter = 0;
+        for (int j = Net.layers.size()-1; j >= 0; j--){
+            pair<pair<vector<vector<double>>, vector<double>>, vector<double>> p1 = Net.back_propagation(Net.layers[j], {ac_y[i].first, ac_y[i].second}, is_last, init_cost, Net.layers.back());
+            cout << "for layer " << j << "; with " << ac_x[i] << " " << ac_y[i].first << "& " << ac_y[i].second << endl;
+            cout << "weight change: " << endl;
+            for (int k = 0; k < p1.first.first.size(); k++){
+                for (int l = 0; l < p1.first.first[0].size(); l++)cout << p1.first.first[k][l] << " ";
+                cout << endl;
+            }
+            cout << "bias change: " << endl;
+            for (int k = 0; k < p1.first.second.size(); k++)cout << p1.first.second[k] << " ";
+            cout << endl;
+            init_cost = p1.second;
+            if (i == 0){
+                for (int k = 0; k < p1.first.first.size(); k++){
+                    for (int l = 0; l < p1.first.first[0].size(); l++){
+                        p1.first.first[k][l] /= batch_size;
+                    }
+                }
+                for (int k = 0; k < p1.first.second.size(); k++)p1.first.second[k] /= batch_size;
+                suggestions.push_back(p1.first);
+            }
+            else {
+                for (int k = 0; k < p1.first.first.size(); k++){
+                    for (int l = 0; l < p1.first.first[0].size(); l++){
+                        suggestions[counter].first[k][l] += p1.first.first[k][l] / batch_size;
+                    }
+                }
+                for (int k = 0; k < p1.first.second.size(); k++)suggestions[counter].second[k] += p1.first.second[k] / batch_size;
+            }
+            counter++;
+
+            is_last = false;
+        }
+    }
+
+    reverse(all(suggestions));
+
+    cout << "SUGGESTIONS" << endl << endl;
+
+    int counter = 0;
+    for (auto p : suggestions){
+        cout << "no" << counter << endl;
+        cout << "weight change: " << endl;
+        for (int k = 0; k < p.first.size(); k++){
+            for (int l = 0; l < p.first[0].size(); l++)cout << p.first[k][l] << " ";
+            cout << endl;
+        }
+        cout << "bias change: " << endl;
+        for (int k = 0; k < p.second.size(); k++)cout << p.second[k] << " ";
+        cout << endl;
+        Net.update(counter, p.first, p.second, learning_rate);
+
+        counter++;
+    }
+
+}
 
 int main(){
     //odd or not
@@ -204,7 +288,7 @@ int main(){
     }    
 
     vector<pair<string, pair<int, int> > > v;
-    v.push_back({"fc-layer", {1, 8}});
+    v.push_back({"fc-layer", {8, 8}});
     v.push_back({"sigmoid", {0,  0}});
     v.push_back({"fc-layer", {8, 8}});
     v.push_back({"sigmoid", {0,  0}});
@@ -217,6 +301,24 @@ int main(){
     cout << "forward_ret: ";
     for (auto e : forward_ret)cout << e << " ";
     cout << endl;
+
+    cout << "THEN" << endl;
+
+    for (int i = 0; i < Net.layers[0].weights.size(); i++)cout << Net.layers[0].weights[i][0] << " ";
+    cout << endl;
+
+    train(Net, train_x, train_y, 4, 1);
+
+    cout << "NOW" << endl;
+
+    for (int i = 0; i < Net.layers[0].weights.size(); i++)cout << Net.layers[0].weights[i][0] << " ";
+    cout << endl;
+
+
+    for (double x : train_x){
+        forward_ret = Net.forward({x});
+        cout << x << " " << forward_ret[0] << " " << forward_ret[1] << endl;
+    }
 
 
 
