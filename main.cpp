@@ -51,10 +51,21 @@ vector<vector<double> > matrixTranspose(const vector<vector<double> >& M){
     return M1;
 }
 
-vector<double> innerProduct(vector<double> v1, vector<double> v2){
+vector<double> weirdProduct(vector<double> v1, vector<double> v2){
     vector<double> v3;
     for (int i = 0; i < v1.size(); i++)v3.push_back(v1[i]*v2[i]);
     return v3;
+}
+
+vector<vector<double>> nmatr(vector<double> v1, vector<double> v2){
+    vector<vector<double> > ret;
+    for (int i = 0; i < v1.size(); i++){
+        ret.push_back({});
+        for (int j = 0; j < v2.size(); j++){
+            ret[i].push_back(v2[j]*v1[i]);
+        }
+    }
+    return ret;
 }
 
 vector<vector<double> > gen_empty_NxM(int n, int m){
@@ -76,8 +87,10 @@ double sig(double x){
     return min(1.0/(1.0 + exp(-x)), 1.0);
 }
 
-double dsig(double x){
-    return min(sig(x)*(1-sig(-x)), x);
+vector<double> dsig(vector<double> x){
+    vector<double> ret;
+    for (auto e : x)ret.push_back(sig(e)*(1-sig(-e)));
+    return ret;
 }
 
 vector<double> sigmoid_it(vector<double> x){
@@ -129,10 +142,9 @@ struct Layer {
     }
 
     vector<double> feedForward(vector<double> x){
-        return lastActivation = activation(vectorAdd(matrixMult(x, weights), biases), activation_method);
+        return lastActivation = vectorAdd(matrixMult(x, weights), biases);
     }
 };
-
 
 struct Network{
     vector<Layer> layers;
@@ -151,44 +163,15 @@ struct Network{
         reverse(all(layers));
     }
 
-    vector<double> forward(vector<double> start){
+    vector<pair<vector<double>, vector<double> > > forward(vector<double> X){
+        vector<pair<vector<double>, vector<double> > > ret;
         for (int i = 0; i < layers.size(); i++){
-            //cout << "in_forward: " << i << ": " << layers[i].biases[0] << endl;
-            //for (auto e : start)cout << e << " ";
-            //cout << endl;
-            //cout << "i: " << i << "  start.size():" << start.size() << endl; 
-            start = layers[i].feedForward(start);
+            vector<double> temp_z = layers[i].feedForward(X);
+            vector<double> temp_a = activation(temp_z, layers[i].activation_method);
+            X = temp_a;
+            ret.push_back({temp_z, temp_a});
         }
-        
-        return start;
-    }
-
-    pair<pair<vector<vector<double>>, vector<double>>, vector<double>> back_propagation(Layer L, vector<double> Y, bool is_last, vector<double> init_cost, Layer last_layer){
-        vector<vector<double>> weight_proposals = L.weights;
-        vector<double> bias_proposals = L.biases; 
-
-        if (is_last)for (int j = 0; j < L.lastActivation.size(); j++)init_cost[j] = 2*(L.lastActivation[j]-Y[j]);
-    
-        for (int j = 0; j < L.lastActivation.size(); j++){
-            bias_proposals[j] = dsig(L.lastActivation[j])*init_cost[j];
-            if (abs(bias_proposals[j]) < 0.0001 || abs(bias_proposals[j]) > 1)bias_proposals[j] = 0;
-        }
-
-        for (int k = 0; k < L.n; k++){
-            for (int j = 0; j < L.lastActivation.size(); j++){
-                weight_proposals[j][k] = last_layer.lastActivation[k]*dsig(L.lastActivation[j])*init_cost[j];
-                if (abs(weight_proposals[j][k]) < 0.0001 || abs(weight_proposals[j][k]) > 1)weight_proposals[j][k] = 0;
-            }
-        }
-        
-        //cout << "LW " << L.weights.size() << " " << L.weights[0].size() << endl;
-        //vector<vector<double>> mT = matrixTranspose(L.weights);
-        //cout << "mT " << mT.size() << " " << mT[0].size() << endl;
-
-
-        init_cost = matrixMult(bias_proposals, matrixTranspose(L.weights));
-        
-        return {{weight_proposals, bias_proposals}, init_cost};
+        return ret;
     }
 
     void update(int layer_no, vector<vector<double>> weight_proposals, vector<double> bias_proposals, double alpha){
@@ -200,6 +183,29 @@ struct Network{
 
         for (int i = 0; i < bias_proposals.size(); i++)layers[layer_no].biases[i] -= alpha*bias_proposals[i];
     }
+
+    void back_propagation(vector<pair<vector<double>, vector<double>>> from_forward, vector<double> X, vector<double> Y, double batch_size, double learning_rate){
+        vector<double> dz;
+        vector<vector<double>> weights;
+        vector<pair<vector<vector<double> >, vector<double>>> ret;
+        for (int i = layers.size()-1; i >= 0; i--){
+            if (i == layers.size()-1)for (int j = 0; j < Y.size(); j++)dz.push_back(2*(from_forward[i].second[j]-Y[j]));
+            else dz = weirdProduct(matrixMult(dz, matrixTranspose(weights)), dsig(from_forward[i].first));
+
+            vector<vector<double>> dw;
+            if (i == 0)dw = nmatr(dz, X);
+            else dw = nmatr(dz, from_forward[i-1].second);
+
+            vector<double> db = dz;
+            weights = layers[i].weights;
+
+            for (int i = 0; i < dw.size(); i++)for (int j = 0; j < dw[i].size(); j++)dw[i][j] /= batch_size;
+            for (int i = 0; i < db.size(); i++)db[i] /= batch_size;
+
+            update(i, dw, db, learning_rate);
+        }
+    }
+    
 
 };
 
@@ -216,45 +222,8 @@ void train(Network& Net, vector<vector<double>> train_x, vector<pair<double, dou
 
 
     for (int i = 0; i < batch_size; i++){
-        Net.forward(ac_x[i]);
-        bool is_last = true;
-        vector<double> init_cost = {0, 0};
-        int counter = 0;
-        for (int j = Net.layers.size()-1; j >= 0; j--){
-            pair<pair<vector<vector<double>>, vector<double>>, vector<double>> p1 = Net.back_propagation(Net.layers[j], {ac_y[i].first, ac_y[i].second}, is_last, init_cost, Net.layers.back());
-            init_cost = p1.second;
-            if (i == 0){
-                for (int k = 0; k < p1.first.first.size(); k++){
-                    for (int l = 0; l < p1.first.first[0].size(); l++){
-                        p1.first.first[k][l] /= batch_size;
-                    }
-                }
-                for (int k = 0; k < p1.first.second.size(); k++)p1.first.second[k] /= batch_size;
-                suggestions.push_back(p1.first);
-            }
-            else {
-                for (int k = 0; k < p1.first.first.size(); k++){
-                    for (int l = 0; l < p1.first.first[0].size(); l++){
-                        suggestions[counter].first[k][l] += p1.first.first[k][l] / batch_size;
-                    }
-                }
-                for (int k = 0; k < p1.first.second.size(); k++)suggestions[counter].second[k] += p1.first.second[k] / batch_size;
-            }
-            counter++;
-
-            is_last = false;
-        }
-    }
-
-    reverse(all(suggestions));
-
-    //cout << "SUGGESTIONS" << endl << endl;
-
-    int counter = 0;
-    for (auto p : suggestions){
-        Net.update(counter, p.first, p.second, learning_rate);
-
-        counter++;
+        vector<pair<vector<double>, vector<double>>> from_forward = Net.forward(ac_x[i]);
+        Net.back_propagation(from_forward, ac_x[i], {ac_y[i].first, ac_y[i].second}, batch_size, learning_rate);
     }
 
 }
@@ -263,7 +232,7 @@ double evaluate(Network& Net, vector<vector<double>> X, vector<vector<double>> Y
     double sum = 0;
     int counter = 0;
     for (auto e : X){
-        vector<double> returni = Net.forward(e);
+        vector<double> returni = Net.forward(e).back().second;
         for (int i = 0; i < returni.size(); i++){
             sum += (returni[i]-Y[counter][i])*(returni[i]-Y[counter][i]);
         }
@@ -293,11 +262,11 @@ int main(){
     v.push_back({"softmax", {0,  0}});
 
     Network Net(v);
-    vector<double> forward_ret = Net.forward(train_x[0]);
+    vector<double> forward_ret = Net.forward(train_x[0]).back().second;
 
 
     int amount_of_epochs = 10000, batch_size = 16;
-    double learning_rate = 0.715;
+    double learning_rate = 0.15;
     for (int i = 0; i < amount_of_epochs; i++){
         if (i%100 == 0){
             vector<vector<double>> temp_y;
@@ -310,7 +279,7 @@ int main(){
 
     int counter = 0;
     for (vector<double> x : train_x){
-        forward_ret = Net.forward(x);
+        forward_ret = Net.forward(x).back().second;
         cout << ++counter << " " << forward_ret[0] << " " << forward_ret[1] << endl;
     }
 
