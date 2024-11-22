@@ -33,14 +33,18 @@ vector<double> vectorAdd(const vector<double>& v1, const vector<double>& v2){
 }
 
 vector<double> matrixMult(const vector<double>& x, const vector<vector<double>>& weights){
-    vector<double> ret(weights.size(), 0);
-    if (weights[0].size() != x.size()){
+    if (weights.empty()){
+        cout << "weights is empty" << endl;
+        return {};
+    }
+    vector<double> ret(weights[0].size(), 0);
+    if (weights.size() != x.size()){
         cout << "Error matrixMult:  weights[0].size():" << weights[0].size() << "  while   x.size():" << x.size() << "  and weights.size():" << weights.size() << endl; 
         return {-100000000001};
     }
-    for (int i = 0; i < weights.size(); i++){
-        for (int j = 0; j < weights[0].size(); j++){
-            ret[i] += weights[i][j]*x[j];
+    for (int j = 0; j < weights[0].size(); j++){
+        for (int i = 0; i < weights.size(); i++){
+            ret[j] += weights[i][j]*x[i];
         }
     }
     return ret;
@@ -48,6 +52,7 @@ vector<double> matrixMult(const vector<double>& x, const vector<vector<double>>&
 
 vector<vector<double> > matrixTranspose(const vector<vector<double> >& M){
     vector<vector<double> > M1;
+    if (M.empty() || M[0].empty())return {{}};
     for (int j = 0; j < M[0].size(); j++){
         M1.push_back({});
         for (int i = 0; i < M.size(); i++){
@@ -58,44 +63,53 @@ vector<vector<double> > matrixTranspose(const vector<vector<double> >& M){
 }
 
 vector<double> weirdProduct(vector<double> v1, vector<double> v2){
+    if (v1.size() != v2.size()){
+        cout << "v1 != v2" << endl;
+    }
     vector<double> v3;
     for (int i = 0; i < v1.size(); i++)v3.push_back(v1[i]*v2[i]);
     return v3;
 }
 
-vector<vector<double>> nmatr(vector<double>& v1, vector<double>& v2){
+vector<vector<double>> nmatr(vector<double> v1, vector<double> v2){
+    //cout << "nmatr is called" << endl;
     vector<vector<double> > ret;
+    for (int i = 0; i < v1.size(); i++)ret.push_back({});
+    //cout << "ret is set" << endl;
     for (int i = 0; i < v1.size(); i++){
-        ret.push_back({});
+        //cout << i << ": ";
         for (int j = 0; j < v2.size(); j++){
             ret[i].push_back(v2[j]*v1[i]);
+            //cout << j << ", ";
         }
+        //cout << endl;
     }
+    //cout << "nmatr is return" << " " << ret.size() << " , " << ret[0].size() << endl; 
     return ret;
 }
 
 vector<vector<double> > gen_empty_NxM(int n, int m){
     vector<vector<double> > ret;
-    for (int i = 0; i < m; i++){
-        ret.push_back({});
-        for (int j = 0; j < n; j++)ret[i].push_back(((double)(rand()%1000))/1000.0);
+    for (int i = 0; i < n; i++)ret.push_back({});
+    for (int i = 0; i < n; i++){
+        for (int j = 0; j < m; j++)ret[i].push_back(((double)(rand()%1000)-500.0)/1000.0);
     }
     return ret;
 }
 
 vector<double> gen_empty_N(int n){
     vector<double> ret;
-    for (int i = 0; i < n; i++)ret.push_back(((double)(rand()%1000))/1000.0);
+    for (int i = 0; i < n; i++)ret.push_back(((double)(rand()%1000)-500.0)/1000.0);
     return ret;
 }
 
 double sig(double x){
-    return min(1.0/(1.0 + exp(-x)), 1.0);
+    return 1.0/(1.0 + exp(-x));
 }
 
 vector<double> dsig(vector<double> x){
     vector<double> ret;
-    for (auto e : x)ret.push_back(sig(e)*(1-sig(-e)));
+    for (auto e : x)ret.push_back(sig(e)*(1-sig(e)));
     return ret;
 }
 
@@ -105,6 +119,21 @@ vector<double> sigmoid_it(vector<double> x){
     return ret;
 }
 
+vector<double> drelu(vector<double> x){
+    vector<double> ret;
+    for (double e : x)ret.push_back(e > 0);
+    return ret;
+}
+
+double relu(double x){
+    return max(x, (double)0.0);
+}
+
+vector<double> relu_it(vector<double> x){
+    vector<double> ret;
+    for (auto e : x)ret.push_back(relu(e));
+    return ret;
+}
 
 vector<double> softmax_it(vector<double> x){
     vector<double> ret;
@@ -124,6 +153,9 @@ vector<double> activation(vector<double> x, int method){
             break;
         case 2:
             return x;
+            break;
+        case 3:
+            return relu_it(x);
             break;
         default:
             cout << "nothing implemented in activation! method:" << method << endl;
@@ -161,6 +193,7 @@ struct Network{
                 int amethod = 2;
                 if (last == "sigmoid")amethod = 0;
                 else if (last == "softmax")amethod = 1;
+                else if (last == "relu")amethod = 3;
                 Layer L(0, v[i].second.first, v[i].second.second, gen_empty_NxM(v[i].second.first, v[i].second.second), gen_empty_N(v[i].second.second), amethod);
                 layers.push_back(L);
             }
@@ -190,17 +223,30 @@ struct Network{
         for (int i = 0; i < bias_proposals.size(); i++)layers[layer_no].biases[i] -= alpha*bias_proposals[i];
     }
 
-    void back_propagation(vector<pair<vector<double>, vector<double>>>& from_forward, vector<double>& X, vector<double>& Y, double batch_size, double learning_rate){
+    void back_propagation(vector<pair<vector<double>, vector<double>>> from_forward, vector<double> X, vector<double> Y, double batch_size, double learning_rate){
         vector<double> dz;
         vector<vector<double>> weights;
         vector<pair<vector<vector<double> >, vector<double>>> ret;
+        //cout << "here" << endl;
         for (int i = layers.size()-1; i >= 0; i--){
-            if (i == layers.size()-1)for (int j = 0; j < Y.size(); j++)dz.push_back(2*(from_forward[i].second[j]-Y[j]));
-            else dz = weirdProduct(matrixMult(dz, matrixTranspose(weights)), dsig(from_forward[i].first));
+            //cout << from_forward[i].second.size() << " " << Y.size() << endl;
+            if (i == layers.size()-1)for (int j = 0; j < Y.size(); j++)dz.push_back(2.0*(from_forward[i].second[j]-Y[j]));
+            else {
+                if (layers[i].activation_method == 0) dz = weirdProduct(matrixMult(dz, matrixTranspose(weights)), dsig(from_forward[i].first));
+                else if (layers[i].activation_method == 1 || layers[i].activation_method == 3) dz = weirdProduct(matrixMult(dz, matrixTranspose(weights)), drelu(from_forward[i].first));
+            }
+
+            //cout << "iallafall här" << endl;
 
             vector<vector<double>> dw;
-            if (i == 0)dw = nmatr(dz, X);
-            else dw = nmatr(dz, from_forward[i-1].second);
+            //cout << i << ": ";
+            //if (i == 0)cout << X.size() << endl;
+            //else cout << from_forward[i-1].second.size() << endl;
+            if (i == 0)dw = nmatr(X, dz);
+            else dw = nmatr(from_forward[i-1].second, dz);
+
+            //cout << "dw: " << dw.size() << " " << dw[0].size() << endl;
+
 
             vector<double> db = dz;
             weights = layers[i].weights;
@@ -210,40 +256,18 @@ struct Network{
 
             update(i, dw, db, learning_rate);
         }
+        return;
     }
     
 
 };
 
-void train(Network& Net, vector<vector<double>>& train_x, vector<vector<double> >& train_y, int batch_size, double learning_rate){
-    vector<vector<double>> ac_x;
-    vector<vector<double>> ac_y;
+void train(Network& Net, vector<vector<double>> batch_x, vector<vector<double>> batch_y, double batch_size, double learning_rate){
     for (int i = 0; i < batch_size; i++){
-        int j = rand()%(train_x.size());
-        ac_x.push_back(train_x[j]);
-        ac_y.push_back(train_y[j]);
+        vector<pair<vector<double>, vector<double>>> from_forward = Net.forward(batch_x[i]);        
+        Net.back_propagation(from_forward, batch_x[i], batch_y[i], batch_size, learning_rate);
     }
-
-    vector<pair<vector<vector<double>>, vector<double>>> suggestions;
-
-    for (int i = 0; i < batch_size; i++){
-        chrono::time_point<chrono::system_clock> starti = chrono::system_clock::now();
-        vector<pair<vector<double>, vector<double>>> from_forward = Net.forward(ac_x[i]);
-        chrono::time_point<chrono::system_clock> endi = chrono::system_clock::now();
-
-        chrono::duration<double> elapsed_seconds = endi - starti;
-        //cout << "forward_time: " << elapsed_seconds.count() << endl;
-        
-        Net.back_propagation(from_forward, ac_x[i], ac_y[i], batch_size, learning_rate);
-
-        chrono::time_point<chrono::system_clock> endi2 = chrono::system_clock::now();
-
-        elapsed_seconds = endi2 - endi;
-        //cout << "back_time: " << elapsed_seconds.count() << endl;
-
-
-    }
-
+    return;
 }
 
 double evaluate(Network& Net, vector<vector<double>> X, vector<vector<double>> Y){
@@ -354,10 +378,12 @@ int main(){
 
 
     vector<pair<string, pair<int, int> > > v;
-    v.push_back({"fc-layer", {784, 10}});
+    v.push_back({"fc-layer", {784, 128}});
     v.push_back({"sigmoid", {0,  0}});
-    v.push_back({"fc-layer", {10, 10}});
-    v.push_back({"softmax", {0,  0}});
+    v.push_back({"fc-layer", {128, 64}});
+    v.push_back({"sigmoid", {0,  0}});
+    v.push_back({"fc-layer", {64, 10}});
+    v.push_back({"softmax", {0, 0}});
     //v.push_back({"fc-layer", {32, 10}});
     //v.push_back({"softmax", {0,  0}});
 
@@ -366,21 +392,52 @@ int main(){
     cout << train_y[0][5] <<  " " << train_x[0].size() << endl;
     cout << test_y[0][7] <<  " " << test_x[0].size() << endl;
 
-    int amount_of_epochs = 10000, batch_size = 128;
-    double learning_rate = 0.15;
-    for (int i = 0; i < amount_of_epochs; i++){
-        if (i%1000 == 0){
+    vector<double> forthis;
+    for (int i = 0; i < 784; i++)forthis.push_back(1.0);
+
+    vector<pair<vector<double>, vector<double>>> from_for = Net.forward(forthis);
+
+    cout << "random guess for 1...1: ";
+    for (auto e : from_for.back().second)cout << e << " ";
+    cout << endl;
+
+    int amount_of_batch_epochs = 10000, batch_size = 32;
+    double learning_rate = 0.101;
+
+    double last = 100000000000001;
+    for (int i = 0; i < amount_of_batch_epochs; i++){
+        if (i%100 == 0){
             vector<vector<double>> temp_x;
             vector<vector<double>> temp_y;
-            for (int j = 0; j < 1000; j++){
+            for (int j = 0; j < 10000; j++){
                 temp_x.push_back(test_x[j]);
                 temp_y.push_back(test_y[j]);
             }
 
-            cout << "After " << i << " epochs: " << evaluate(Net, temp_x, temp_y) << "error" << " correctness:" << correcti(Net, temp_x, temp_y) << endl;
+            double ev = evaluate(Net, temp_x, temp_y);
+            if (ev > last)learning_rate /= exp(1);
+
+            last = ev;
+
+            cout << "After " << i << " epochs: error" << ev << " correctness:" << correcti(Net, temp_x, temp_y) << endl;
         }
-        train(Net, train_x, train_y, batch_size, learning_rate);
+
+        vector<vector<double> > batch_x;
+        vector<vector<double> > batch_y;
+        for (int i = 0; i < batch_size; i++){
+            int r = rand()%train_x.size();
+            batch_x.push_back(train_x[r]);
+            batch_y.push_back(train_y[r]);
+        }
+
+        train(Net, batch_x, batch_y, batch_size, learning_rate);
     }
+
+    vector<double> test_vec = {3.14, 14.2, 1.23};
+    vector<vector<double>> test_mat = {{2.0, 3.0, 1.5, 2.4}, {1.0, 4.0, 2.0, 3.0}, {2.3, 1.0, 0.0, -1.0}};
+    vector<double> trest = matrixMult(test_vec, test_mat);
+    for (auto e : trest)cout << e << " ";
+    cout << endl;
 
 
 
